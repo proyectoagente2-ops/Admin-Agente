@@ -2,7 +2,6 @@
 
 import { createServerClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
 const loginSchema = z.object({
@@ -68,26 +67,12 @@ export async function login(formData: FormData): Promise<LoginResult> {
       }
     }
 
-    // Si todo está bien, revalidamos y redirigimos
+    // Si todo está bien, revalidamos; la navegación la maneja el cliente
     revalidatePath('/', 'layout')
-    
-    // Retornamos éxito antes de redireccionar
-    const result: LoginResult = {
+    return {
       success: true
     }
-    
-    redirect('/dashboard')
-    return result // Este return nunca se ejecutará por el redirect
   } catch (error) {
-    // Verificamos si es un error de redirección
-    if (error instanceof Error && 
-        'digest' in error && 
-        typeof error.digest === 'string' && 
-        error.digest.includes('NEXT_REDIRECT')
-    ) {
-      return { success: true }
-    }
-    
     console.error('Unexpected error:', error)
     return {
       success: false,

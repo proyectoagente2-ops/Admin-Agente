@@ -36,7 +36,7 @@ export async function createDocument(formData: FormData) {
     const fileName = `${code}-v${version}.${fileExt}`
     const filePath = `${flow}/${fileName}`
 
-    const { error: uploadError, data: fileData } = await supabase
+    const { error: uploadError } = await supabase
       .storage
       .from('documents')
       .upload(filePath, file, {

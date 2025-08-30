@@ -17,6 +17,11 @@
       "type": "stdio",
       "command": "npx",
       "args": ["-y", "@upstash/context7-mcp"]
+    },
+	
+	 "aceternityui": {
+      "command": "npx",
+      "args": ["aceternityui-mcp"]
     }
 		
 	},

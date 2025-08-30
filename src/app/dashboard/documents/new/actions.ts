@@ -36,15 +36,21 @@ export async function createDocument(formData: FormData) {
     const fileName = `${code}-v${version}.${fileExt}`
     const filePath = `${flow}/${fileName}`
 
+    // Convertir el archivo a un Buffer para subirlo
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
     const { error: uploadError, data: fileData } = await supabase
       .storage
       .from('documents')
-      .upload(filePath, file, {
+      .upload(filePath, buffer, {
         cacheControl: '3600',
-        upsert: false
+        upsert: false,
+        contentType: file.type,
       })
 
     if (uploadError) {
+      console.error('Error al subir archivo:', uploadError)
       throw new Error('Error al subir el archivo')
     }
 
@@ -61,7 +67,8 @@ export async function createDocument(formData: FormData) {
         file_name: fileName,
         tags,
         created_by: user.id,
-        updated_by: user.id
+        updated_by: user.id,
+        user_id: user.id, // Campo necesario para RLS
       })
 
     if (dbError) {

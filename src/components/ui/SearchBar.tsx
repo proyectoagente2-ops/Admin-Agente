@@ -15,7 +15,10 @@ export function SearchBar() {
 
   const createQueryString = useCallback(
     (name: string, value: string) => {
-      const params = new URLSearchParams(searchParams)
+      const params = new URLSearchParams()
+      searchParams.forEach((val, key) => {
+        params.set(key, val)
+      })
       params.set(name, value)
       return params.toString()
     },

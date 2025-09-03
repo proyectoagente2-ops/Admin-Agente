@@ -45,6 +45,7 @@ export type Database = {
           updated_by: string
           created_at: string
           updated_at: string
+          processed_by_n8n?: boolean
         }
         Insert: {
           id?: string

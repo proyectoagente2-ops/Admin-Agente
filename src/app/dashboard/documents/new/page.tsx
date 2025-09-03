@@ -127,7 +127,7 @@ export default function NewDocumentPage() {
               <option value="">Selecciona un flujo</option>
               <option value="aprendiz">Aprendiz</option>
               <option value="instructor">Instructor</option>
-              <option value="administrador">Administrador</option>
+              <option value="administrativo">Administrativo</option>
             </select>
           </motion.div>
         </motion.div>

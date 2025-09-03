@@ -1,0 +1,149 @@
+'use server'
+
+import { createServerClient } from '@/utils/supabase/server'
+import { revalidatePath } from 'next/cache'
+
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL as string
+
+if (!N8N_WEBHOOK_URL) {
+  throw new Error('La URL del webhook de n8n no está configurada')
+}
+
+async function tryWebhook(formData: FormData, attempt = 1): Promise<Response> {
+  // Intentar primero con la URL configurada
+  const urls = [N8N_WEBHOOK_URL]
+  
+  // Si es URL de prueba, agregar URL de producción como respaldo
+  if (N8N_WEBHOOK_URL.includes('webhook-test')) {
+    urls.push(N8N_WEBHOOK_URL.replace('webhook-test', 'webhook'))
+  }
+
+  let lastError: Error | null = null
+
+  for (const url of urls) {
+    try {
+      console.log(`Intento ${attempt} usando URL: ${url}`)
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Accept': '*/*',
+          'User-Agent': 'Admin-Agente/1.0',
+        }
+      })
+
+      console.log(`Respuesta de ${url}:`, {
+        status: response.status,
+        statusText: response.statusText
+      })
+
+      if (response.ok) {
+        return response
+      }
+
+      const errorText = await response.text()
+      throw new Error(`${response.statusText} (${response.status})\n${errorText}`)
+    } catch (error) {
+      lastError = error as Error
+      console.error(`Error con ${url}:`, error)
+    }
+  }
+
+  // Si todos los intentos fallan y aún no hemos alcanzado el máximo, reintentamos
+  if (attempt < 3) {
+    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000)
+    console.log(`Esperando ${delay}ms antes del siguiente intento...`)
+    await new Promise(resolve => setTimeout(resolve, delay))
+    return tryWebhook(formData, attempt + 1)
+  }
+
+  throw lastError || new Error('Error desconocido al enviar a n8n')
+}
+
+export async function uploadToN8N(documentData: {
+  id: string
+  title: string
+  description: string
+  code: string
+  version: string
+  flow: string
+  file_path: string
+  file_name: string
+  created_at?: string
+  created_by?: string
+}) {
+  const supabase = await createServerClient()
+
+  try {
+    // Obtener el archivo de Supabase Storage
+    const { data: fileData, error: downloadError } = await supabase
+      .storage
+      .from('documents')
+      .download(documentData.file_path)
+
+    if (downloadError) {
+      console.error('Error al descargar el archivo:', downloadError)
+      throw new Error('Error al obtener el archivo de Storage')
+    }
+
+    // Crear el objeto con los datos del documento
+    const jsonData = {
+      title: documentData.title,
+      description: documentData.description,
+      code: documentData.code,
+      version: documentData.version,
+      flow: documentData.flow,
+      documentId: documentData.id,
+      created_at: documentData.created_at,
+      created_by: documentData.created_by,
+      file_name: documentData.file_name
+    }
+
+    // Crear FormData para enviar al webhook
+    const formData = new FormData()
+    
+    // Agregar el archivo como base64
+    const base64File = await fileData.arrayBuffer()
+    const base64String = Buffer.from(base64File).toString('base64')
+    
+    // Agregar los datos como JSON y el archivo
+    formData.append('data', JSON.stringify(jsonData))
+    formData.append('file', base64String)
+    formData.append('filename', documentData.file_name)
+
+    // Log inicial
+    console.log('Preparando envío a n8n:', {
+      documentId: documentData.id,
+      fileName: documentData.file_name,
+      dataFields: Object.keys(jsonData)
+    })
+
+    // Intentar enviar con sistema de reintentos
+    await tryWebhook(formData)
+
+    // Si llegamos aquí, el envío fue exitoso
+    // Actualizar el estado del documento en Supabase
+    const { error: updateError } = await supabase
+      .from('documents')
+      .update({
+        updated_at: new Date().toISOString(),
+        processed_by_n8n: true,
+      })
+      .eq('id', documentData.id)
+
+    if (updateError) {
+      console.error('Error updating document:', updateError)
+      throw new Error('Error al actualizar el estado del documento')
+    }
+
+    revalidatePath('/dashboard')
+    return { success: true }
+
+  } catch (error) {
+    console.error('Error en uploadToN8N:', error)
+    return { 
+      error: error instanceof Error ? error.message : 'Error al procesar el documento en n8n'
+    }
+  }
+}

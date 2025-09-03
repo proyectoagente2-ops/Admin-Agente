@@ -57,8 +57,39 @@ export async function uploadToN8N(documentData: {
       body: formData,
     })
 
+    // Verificar el tipo de contenido de la respuesta
+    const contentType = response.headers.get('content-type')
     if (!response.ok) {
-      throw new Error(`Error al enviar a n8n: ${response.statusText}`)
+      let errorMessage = `Error al enviar a n8n: ${response.statusText}`
+      try {
+        // Intentar obtener más detalles del error
+        if (contentType?.includes('application/json')) {
+          const errorData = await response.json()
+          errorMessage = errorData.message || errorData.error || errorMessage
+        } else {
+          const textError = await response.text()
+          errorMessage = `Error al enviar a n8n: ${response.status} ${response.statusText}`
+          console.error('Respuesta no JSON:', textError)
+        }
+      } catch (parseError) {
+        console.error('Error al parsear la respuesta:', parseError)
+      }
+      throw new Error(errorMessage)
+    }
+
+    // Verificar y procesar la respuesta
+    let responseData
+    try {
+      if (contentType?.includes('application/json')) {
+        responseData = await response.json()
+      } else {
+        // Si no es JSON, convertimos la respuesta en un objeto
+        const text = await response.text()
+        responseData = { message: text }
+      }
+    } catch (parseError) {
+      console.error('Error al parsear la respuesta:', parseError)
+      throw new Error('Error al procesar la respuesta del servidor')
     }
 
     // Actualizar el estado del documento en Supabase

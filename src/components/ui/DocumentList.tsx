@@ -1,18 +1,17 @@
 'use client'
 
 import type { Database } from '@/utils/types/database.types'
-import { createClient } from '@/utils/supabase/client'
 import { useState, useRef } from 'react'
+import { createClient } from '@/utils/supabase/client'
 import clsx from 'clsx'
 import { deleteDocument } from '@/app/dashboard/documents/actions'
-import { uploadToN8N } from '@/app/dashboard/documents/actions/uploadToN8N'
 
 type Document = Database['public']['Tables']['documents']['Row']
 
 export function DocumentList({ documents }: { documents: Document[] }) {
   const [loading, setLoading] = useState<{[key: string]: boolean}>({})
   const [deleting, setDeleting] = useState<{[key: string]: boolean}>({})
-  const [processing, setProcessing] = useState<{[key: string]: boolean}>({})
+  const [processingN8N, setProcessingN8N] = useState<{[key: string]: boolean}>({})
   const [error, setError] = useState<string | null>(null)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [password, setPassword] = useState('')
@@ -87,58 +86,24 @@ export function DocumentList({ documents }: { documents: Document[] }) {
   const handleView = async (docId: string) => {
     try {
       setLoading({...loading, [docId]: true})
-      const { data, error } = await supabase
-        .storage
-        .from('documents')
-        .download(documents.find(d => d.id === docId)?.file_path || '')
-      
-      if (error) {
-        console.error('Error downloading file:', error)
+      const doc = documents.find(d => d.id === docId)
+      if (!doc || !doc.file_path) {
+        setError('Documento no encontrado')
         return
       }
 
-      const url = URL.createObjectURL(data)
-      window.open(url, '_blank')
-      URL.revokeObjectURL(url)
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoading({...loading, [docId]: false})
-    }
-  }
+      // Primero intentamos obtener una URL firmada
+      const { data: signedUrlData, error: signedUrlError } = await supabase
+        .storage
+        .from('documents')
+        .createSignedUrl(doc.file_path, 3600) // URL válida por 1 hora
 
-  const handleProcessN8N = async (docId: string) => {
-    try {
-      setProcessing({...processing, [docId]: true})
-      const doc = documents.find(d => d.id === docId)
-      if (!doc) return
-
-      const result = await uploadToN8N(doc)
-      
-      if (result.error) {
-        setError(result.error)
-        setTimeout(() => setError(null), 3000)
-      } else {
-        setSuccessMessage(`Documento enviado exitosamente a n8n:
-          Título: ${doc.title}
-          Código: ${doc.code}
-          Versión: ${doc.version}`)
-        setTimeout(() => setSuccessMessage(null), 5000)
+      if (signedUrlData?.signedUrl) {
+        window.open(signedUrlData.signedUrl, '_blank')
+        return
       }
-    } catch (error) {
-      setError('Error al procesar el documento en n8n')
-      setTimeout(() => setError(null), 3000)
-    } finally {
-      setProcessing({...processing, [docId]: false})
-    }
-  }
 
-  const handleDownload = async (docId: string) => {
-    try {
-      setLoading({...loading, [`${docId}-download`]: true})
-      const doc = documents.find(d => d.id === docId)
-      if (!doc) return
-
+      // Si la URL firmada falla, intentamos la descarga directa
       const { data, error } = await supabase
         .storage
         .from('documents')
@@ -146,21 +111,133 @@ export function DocumentList({ documents }: { documents: Document[] }) {
       
       if (error) {
         console.error('Error downloading file:', error)
+        setError('Error al descargar el archivo')
+        return
+      }
+
+      const url = URL.createObjectURL(data)
+      window.open(url, '_blank')
+      
+      // Liberamos el URL después de un breve delay para asegurar que el navegador lo haya abierto
+      setTimeout(() => {
+        URL.revokeObjectURL(url)
+      }, 1000)
+    } catch (error) {
+      console.error('Error:', error)
+      setError('Error al abrir el documento')
+    } finally {
+      setLoading({...loading, [docId]: false})
+      // Limpiar el mensaje de error después de un tiempo
+      setTimeout(() => setError(null), 3000)
+    }
+  }
+
+  const handleDownload = async (docId: string) => {
+    try {
+      setLoading({...loading, [`${docId}-download`]: true})
+      const doc = documents.find(d => d.id === docId)
+      if (!doc || !doc.file_path) {
+        setError('Documento no encontrado')
+        return
+      }
+
+      // Intentar obtener una URL firmada primero
+      const { data: signedUrlData, error: signedUrlError } = await supabase
+        .storage
+        .from('documents')
+        .createSignedUrl(doc.file_path, 3600)
+
+      if (signedUrlData?.signedUrl) {
+        const a = document.createElement('a')
+        a.href = signedUrlData.signedUrl
+        a.download = doc.file_name || 'documento'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        return
+      }
+
+      // Si la URL firmada falla, intentar descarga directa
+      const { data, error } = await supabase
+        .storage
+        .from('documents')
+        .download(doc.file_path)
+      
+      if (error) {
+        console.error('Error downloading file:', error)
+        setError('Error al descargar el archivo')
         return
       }
 
       const url = URL.createObjectURL(data)
       const a = document.createElement('a')
       a.href = url
-      a.download = doc.file_name
+      a.download = doc.file_name || 'documento'
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      
+      // Liberamos el URL después de un breve delay
+      setTimeout(() => {
+        URL.revokeObjectURL(url)
+      }, 1000)
     } catch (error) {
       console.error('Error:', error)
+      setError('Error al descargar el documento')
     } finally {
       setLoading({...loading, [`${docId}-download`]: false})
+      // Limpiar el mensaje de error después de un tiempo
+      setTimeout(() => setError(null), 3000)
+    }
+  }
+
+  const handleN8NFlow = async (docId: string) => {
+    try {
+      setProcessingN8N({ ...processingN8N, [docId]: true })
+      setError(null) // Limpiar cualquier error previo
+      
+      const doc = documents.find(d => d.id === docId)
+      if (!doc) {
+        throw new Error('Documento no encontrado')
+      }
+
+      // Enviar a nuestra API interna que manejará la comunicación con n8n
+      const response = await fetch('/api/n8n', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          documentId: docId
+        })
+      })
+
+      const data = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Error al enviar al flujo de n8n')
+      }
+
+      if (data.success) {
+        setSuccessMessage(`Documento "${doc.title}" enviado exitosamente al flujo de n8n`)
+        // Refrescar la página para obtener los datos actualizados
+        window.location.reload()
+      } else {
+        throw new Error(data.error || 'Error desconocido al procesar el documento')
+      }
+    } catch (error) {
+      console.error('Error:', error)
+      setError(error instanceof Error ? error.message : 'Error al procesar el documento')
+    } finally {
+      setProcessingN8N({ ...processingN8N, [docId]: false })
+      // Limpiar el mensaje de éxito después de un tiempo
+      if (successMessage) {
+        setTimeout(() => setSuccessMessage(null), 5000)
+      }
+      // Limpiar el mensaje de error después de un tiempo
+      if (error) {
+        setTimeout(() => setError(null), 5000)
+      }
     }
   }
 
@@ -235,49 +312,44 @@ export function DocumentList({ documents }: { documents: Document[] }) {
 
       <div className="overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-slate-200/50 backdrop-blur-xl">
         <div className="overflow-x-auto">
-          <table className="min-w-full bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden shadow-xl border border-white/20">
-            <thead className="bg-gradient-to-r from-blue-50/90 to-indigo-50/90">
-              <tr>
-                <th className="px-6 py-4 text-left">
-                  <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
-                    Documento
-                  </span>
-                </th>
-                <th className="hidden md:table-cell px-6 py-4 text-center">
-                  <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
-                    Código
-                  </span>
-                </th>
-                <th className="hidden lg:table-cell px-6 py-4 text-center">
-                  <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
-                    Versión
-                  </span>
-                </th>
-                <th className="hidden sm:table-cell px-6 py-4 text-center">
-                  <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
-                    Flujo
-                  </span>
-                </th>
-                <th className="hidden md:table-cell px-6 py-4 text-center">
-                  <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
-                    Fecha
-                  </span>
-                </th>
-                <th className="px-6 py-4 text-center">
-                  <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
-                    Acciones
-                  </span>
-                </th>
-              </tr>
-            </thead>
+          <div className="inline-block min-w-full align-middle">
+            <div className="overflow-hidden">
+              <table className="min-w-full divide-y divide-gray-200 table-fixed bg-white/90 backdrop-blur-sm rounded-lg shadow-xl border border-white/20">
+                <thead className="bg-blue-50/90">
+                  <tr>
+                    <th className="sticky left-0 z-10 bg-blue-50/90 min-w-[300px] px-6 py-3 text-left text-xs font-medium text-blue-700 uppercase tracking-wider">
+                      TÍTULO Y DESCRIPCIÓN
+                    </th>
+              <th scope="col" className="px-6 py-5 text-center min-w-[200px]">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#9fb3c8]">
+                  Descripción
+                </span>
+              </th>
+              <th scope="col" className="px-6 py-5 text-center min-w-[150px]">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#9fb3c8]">
+                  Flujo
+                </span>
+              </th>
+              <th scope="col" className="px-6 py-5 text-center min-w-[200px]">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#9fb3c8]">
+                  Fecha
+                </span>
+              </th>
+              <th scope="col" className="px-6 py-5 text-center min-w-[400px]">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#9fb3c8]">
+                  Acciones
+                </span>
+              </th>
+            </tr>
+          </thead>
           <tbody className="divide-y divide-slate-200/50 bg-white/50">
             {documents.map((doc) => (
               <tr 
                 key={doc.id}
                 className="group hover:bg-blue-50/80 transition-colors duration-300"
               >
-                <td className="px-6 py-4">
-                  <div className="flex items-center space-x-4">
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="flex items-center">
                     <div className="h-12 w-12 flex-shrink-0">
                       <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-50 to-white 
                         shadow-lg ring-1 ring-blue-200/50 flex items-center justify-center text-blue-500
@@ -287,28 +359,18 @@ export function DocumentList({ documents }: { documents: Document[] }) {
                         </svg>
                       </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-base font-semibold text-blue-700 group-hover:text-blue-900 transition-colors duration-300 truncate">
+                    <div className="ml-4">
+                      <div className="text-base font-semibold text-blue-700 group-hover:text-blue-900 transition-colors duration-300">
                         {doc.title}
                       </div>
-                      <div className="text-sm text-blue-500/70 mt-0.5 line-clamp-2">{doc.description}</div>
-                      <div className="md:hidden mt-2 flex items-center gap-2 text-xs text-slate-500">
-                        <span>{doc.code}</span>
-                        <span>•</span>
-                        <span>v{doc.version}</span>
-                      </div>
+                      <div className="text-sm text-blue-500/70 mt-0.5">{doc.description}</div>
                     </div>
                   </div>
                 </td>
-                <td className="hidden md:table-cell px-6 py-4 text-center">
-                  <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
-                    {doc.code}
-                  </span>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-blue-600/80">{doc.description}</div>
                 </td>
-                <td className="hidden lg:table-cell px-6 py-4 text-center">
-                  <span className="text-sm text-slate-600">v{doc.version}</span>
-                </td>
-                <td className="hidden sm:table-cell px-6 py-4 whitespace-nowrap">
+                <td className="px-6 py-4 whitespace-nowrap">
                   <span
                     className={clsx(
                       "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset shadow-sm",
@@ -335,8 +397,8 @@ export function DocumentList({ documents }: { documents: Document[] }) {
                     {doc.flow}
                   </span>
                 </td>
-                <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-center">
-                  <span className="text-sm font-medium text-slate-600">
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <span className="text-sm font-medium text-blue-600">
                     {new Date(doc.created_at!).toLocaleDateString('es-ES', {
                       year: 'numeric',
                       month: 'long', 
@@ -345,43 +407,17 @@ export function DocumentList({ documents }: { documents: Document[] }) {
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 justify-end">
-                    {/* Vista móvil - Menú desplegable */}
-                    <div className="sm:hidden w-full">
-                      <select
-                        onChange={(e) => {
-                          const action = e.target.value;
-                          if (action === 'view') handleView(doc.id);
-                          else if (action === 'download') handleDownload(doc.id);
-                          else if (action === 'process') handleProcessN8N(doc.id);
-                          else if (action === 'delete') handleDeleteClick(doc.id);
-                          e.target.value = ''; // Reset después de la acción
-                        }}
-                        className="w-full rounded-lg border-gray-300 text-sm"
-                        disabled={loading[doc.id] || loading[`${doc.id}-download`] || processing[doc.id] || deleting[doc.id]}
-                      >
-                        <option value="">Seleccionar acción</option>
-                        <option value="view">Ver documento</option>
-                        <option value="download">Descargar</option>
-                        {!doc.processed_by_n8n && (
-                          <option value="process">Procesar en n8n</option>
-                        )}
-                        <option value="delete">Eliminar</option>
-                      </select>
-                    </div>
-
-                    {/* Vista desktop - Botones */}
-                    <div className="hidden sm:flex items-center gap-2">
-                      <button
-                        onClick={() => handleView(doc.id)}
-                        disabled={loading[doc.id]}
-                        className={clsx(
-                          "inline-flex items-center rounded-xl p-2",
-                          "text-sm font-medium transition-all duration-300",
-                          "focus:outline-none focus:ring-2 focus:ring-offset-2",
-                          "bg-gradient-to-br from-slate-50 to-white shadow-lg",
-                          "text-slate-700 hover:text-slate-900",
-                          "ring-1 ring-slate-200/50 hover:ring-slate-300/50",
+                  <div className="flex items-center space-x-3">
+                    <button
+                      onClick={() => handleView(doc.id)}
+                      disabled={loading[doc.id]}
+                      className={clsx(
+                        "inline-flex items-center rounded-xl px-3.5 py-2",
+                        "text-sm font-medium transition-all duration-300",
+                        "focus:outline-none focus:ring-2 focus:ring-offset-2",
+                        "bg-gradient-to-br from-slate-50 to-white shadow-lg",
+                        "text-slate-700 hover:text-slate-900",
+                        "ring-1 ring-slate-200/50 hover:ring-slate-300/50",
                         "hover:shadow-emerald-500/20",
                         "focus:ring-emerald-500",
                         {
@@ -419,41 +455,36 @@ export function DocumentList({ documents }: { documents: Document[] }) {
                       {loading[`${doc.id}-download`] ? 'Descargando...' : 'Descargar'}
                     </button>
 
-                    {!doc.processed_by_n8n ? (
-                      <button
-                        onClick={() => handleProcessN8N(doc.id)}
-                        disabled={processing[doc.id]}
-                        className={clsx(
-                          "inline-flex items-center rounded-xl px-3.5 py-2",
-                          "text-sm font-medium transition-all duration-300",
-                          "focus:outline-none focus:ring-2 focus:ring-offset-2",
-                          "bg-gradient-to-br from-purple-50 to-white shadow-lg",
-                          "text-purple-700 hover:text-purple-800",
-                          "ring-1 ring-purple-200/50 hover:ring-purple-300/50",
-                          "hover:shadow-purple-500/20",
-                          "focus:ring-purple-500",
-                          {
-                            "opacity-50 cursor-not-allowed": processing[doc.id],
-                          }
-                        )}
-                        title="Procesar documento en n8n"
+                    <button
+                      onClick={() => handleN8NFlow(doc.id)}
+                      disabled={processingN8N[doc.id]}
+                      className={clsx(
+                        "inline-flex items-center rounded-xl px-3.5 py-2",
+                        "text-sm font-medium transition-all duration-300",
+                        "focus:outline-none focus:ring-2 focus:ring-offset-2",
+                        "bg-gradient-to-br from-purple-50 to-white shadow-lg text-purple-700 hover:text-purple-800 ring-1 ring-purple-200/50",
+                        "hover:shadow-purple-500/20",
+                        "focus:ring-purple-500",
+                        {
+                          "opacity-50 cursor-not-allowed": processingN8N[doc.id],
+                        }
+                      )}
+                    >
+                      <svg 
+                        className="h-4 w-4 mr-2 text-purple-500"
+                        fill="none" 
+                        viewBox="0 0 24 24" 
+                        stroke="currentColor"
                       >
-                        <svg className="h-4 w-4 mr-2 text-purple-500 group-hover:text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3 3m0 0l-3-3m3 3V8" />
-                        </svg>
-                        {processing[doc.id] ? 'Procesando...' : 'Procesar en n8n'}
-                      </button>
-                    ) : (
-                      <span 
-                        className="inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium bg-green-50 text-green-700 ring-1 ring-green-200/50"
-                        title="Este documento ya ha sido procesado en n8n"
-                      >
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                        </svg>
-                        Procesado
-                      </span>
-                    )}
+                        <path 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round" 
+                          strokeWidth="2" 
+                          d="M13 10V3L4 14h7v7l9-11h-7z" 
+                        />
+                      </svg>
+                      {processingN8N[doc.id] ? 'Procesando...' : 'Enviar a n8n'}
+                    </button>
 
                     <button
                       onClick={() => handleDeleteClick(doc.id)}
@@ -478,14 +509,15 @@ export function DocumentList({ documents }: { documents: Document[] }) {
                       {deleting[doc.id] ? 'Eliminando...' : 'Eliminar'}
                     </button>
                   </div>
-                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
     </div>
   )
 }

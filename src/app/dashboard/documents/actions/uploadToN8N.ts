@@ -3,12 +3,11 @@
 import { createServerClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://tpn8n.sierrasoft.co/webhook-test/49500622-8418-4576-b8a3-e7aa0342d01a'
 if (!N8N_WEBHOOK_URL) {
   throw new Error('N8N_WEBHOOK_URL no está configurada en las variables de entorno')
 }
-if (!N8N_WEBHOOK_URL) {
-  throw new Error('N8N_WEBHOOK_URL no está configurada en las variables de entorno')
+
 const MAX_RETRIES = 3
 const RETRY_DELAY = 1000 // 1 segundo
 

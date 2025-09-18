@@ -6,7 +6,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       admin_users: {
@@ -29,6 +29,52 @@ export interface Database {
           last_sign_in?: string | null
         }
         Relationships: []
+      }
+      documents1: {
+        Row: {
+          id: number
+          content: string | null
+          metadata: Json | null
+          embedding: string | null
+          document_id: string | null
+          processed_by_n8n: boolean
+          processed_at: string | null
+          chunks_count: number
+          source_url: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          content?: string | null
+          metadata?: Json | null
+          embedding?: string | null
+          document_id?: string | null
+          processed_by_n8n?: boolean
+          processed_at?: string | null
+          chunks_count?: number
+          source_url?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          content?: string | null
+          metadata?: Json | null
+          embedding?: string | null
+          document_id?: string | null
+          processed_by_n8n?: boolean
+          processed_at?: string | null
+          chunks_count?: number
+          source_url?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documents1_document_id_fkey"
+            columns: ["document_id"]
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       documents: {
         Row: {

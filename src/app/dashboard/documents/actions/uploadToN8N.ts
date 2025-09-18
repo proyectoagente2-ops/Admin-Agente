@@ -3,7 +3,12 @@
 import { createServerClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://tpn8n.sierrasoft.co/webhook-test/49500622-8418-4576-b8a3-e7aa0342d01a'
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL
+if (!N8N_WEBHOOK_URL) {
+  throw new Error('N8N_WEBHOOK_URL no está configurada en las variables de entorno')
+}
+if (!N8N_WEBHOOK_URL) {
+  throw new Error('N8N_WEBHOOK_URL no está configurada en las variables de entorno')
 const MAX_RETRIES = 3
 const RETRY_DELAY = 1000 // 1 segundo
 
@@ -35,6 +40,25 @@ async function sendToN8N(formData: FormData, retryCount = 0): Promise<Response> 
   }
 }
 
+async function validateDocument(supabase: Awaited<ReturnType<typeof createServerClient>>, documentId: string) {
+  const { data, error } = await supabase
+    .from('documents')
+    .select('id')
+    .eq('id', documentId)
+    .single();
+
+  if (error) {
+    console.error('Error validando documento:', error);
+    throw new Error(`Error validando documento: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error(`El documento con ID ${documentId} no existe en la tabla documents`);
+  }
+
+  return data;
+}
+
 export async function uploadToN8N(documentData: {
   id: string
   title: string
@@ -50,6 +74,9 @@ export async function uploadToN8N(documentData: {
   const supabase = await createServerClient()
 
   try {
+    // Validar que el documento existe
+    await validateDocument(supabase, documentData.id)
+
     // Obtener el archivo de Supabase Storage
     const { data: fileData, error: downloadError } = await supabase
       .storage
@@ -74,6 +101,8 @@ export async function uploadToN8N(documentData: {
     formData.append('version', documentData.version)
     formData.append('flow', documentData.flow)
     formData.append('documentId', documentData.id)
+    // Agregar el ID del documento original para la relación con documents1
+    formData.append('document_id', documentData.id)
     if (documentData.created_at) {
       formData.append('created_at', documentData.created_at)
     }

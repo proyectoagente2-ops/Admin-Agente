@@ -95,7 +95,10 @@ export async function uploadToN8N(documentData: {
     // Actualizar el estado del documento en Supabase
     const { error: updateError } = await supabase
       .from('documents')
-      .update({ processed_by_n8n: true })
+      .update({ 
+        processed_by_n8n: true,
+        processed_at: new Date().toISOString()
+      })
       .eq('id', documentData.id)
 
     if (updateError) {

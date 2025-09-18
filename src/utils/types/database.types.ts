@@ -6,7 +6,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export type Database = {
+export interface Database {
   public: {
     Tables: {
       admin_users: {
@@ -45,7 +45,8 @@ export type Database = {
           updated_by: string
           created_at: string
           updated_at: string
-          processed_by_n8n?: boolean
+          processed_by_n8n: boolean | null
+          processed_at: string | null
         }
         Insert: {
           id?: string
@@ -61,6 +62,8 @@ export type Database = {
           updated_by: string
           created_at?: string
           updated_at?: string
+          processed_by_n8n?: boolean
+          processed_at?: string
         }
         Update: {
           id?: string
@@ -76,6 +79,8 @@ export type Database = {
           updated_by?: string
           created_at?: string
           updated_at?: string
+          processed_by_n8n?: boolean
+          processed_at?: string
         }
         Relationships: []
       }
@@ -84,7 +89,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      add_processed_by_n8n_field: {
+        Args: Record<string, never>
+        Returns: void
+      }
     }
     Enums: {
       [_ in never]: never

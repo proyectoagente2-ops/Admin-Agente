@@ -3,7 +3,37 @@
 import { createServerClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
 
-const N8N_WEBHOOK_URL = 'https://agenteia.app.n8n.cloud/webhook-test/d902c645-3446-4690-9ef7-40b861595a7e'
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://tpn8n.sierrasoft.co/webhook-test/49500622-8418-4576-b8a3-e7aa0342d01a'
+const MAX_RETRIES = 3
+const RETRY_DELAY = 1000 // 1 segundo
+
+async function delay(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function sendToN8N(formData: FormData, retryCount = 0): Promise<Response> {
+  try {
+    const response = await fetch(N8N_WEBHOOK_URL, {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (response.status === 404 && retryCount < MAX_RETRIES) {
+      console.log(`Intento ${retryCount + 1}/${MAX_RETRIES}: Webhook no encontrado, reintentando...`)
+      await delay(RETRY_DELAY)
+      return sendToN8N(formData, retryCount + 1)
+    }
+
+    return response
+  } catch (error) {
+    if (retryCount < MAX_RETRIES) {
+      console.log(`Intento ${retryCount + 1}/${MAX_RETRIES}: Error de red, reintentando...`)
+      await delay(RETRY_DELAY)
+      return sendToN8N(formData, retryCount + 1)
+    }
+    throw error
+  }
+}
 
 export async function uploadToN8N(documentData: {
   id: string
@@ -51,11 +81,8 @@ export async function uploadToN8N(documentData: {
       formData.append('created_by', documentData.created_by)
     }
 
-    // Enviar al webhook de n8n
-    const response = await fetch(N8N_WEBHOOK_URL, {
-      method: 'POST',
-      body: formData,
-    })
+    // Enviar al webhook de n8n con reintentos
+    const response = await sendToN8N(formData)
 
     // Verificar el tipo de contenido de la respuesta
     const contentType = response.headers.get('content-type')
@@ -65,7 +92,11 @@ export async function uploadToN8N(documentData: {
         // Intentar obtener más detalles del error
         if (contentType?.includes('application/json')) {
           const errorData = await response.json()
-          errorMessage = errorData.message || errorData.error || errorMessage
+          if (errorData.message?.includes('webhook') && errorData.message?.includes('not registered')) {
+            errorMessage = 'El webhook necesita ser activado en n8n. Por favor, contacta al administrador del sistema.'
+          } else {
+            errorMessage = errorData.message || errorData.error || errorMessage
+          }
         } else {
           const textError = await response.text()
           errorMessage = `Error al enviar a n8n: ${response.status} ${response.statusText}`
@@ -74,6 +105,16 @@ export async function uploadToN8N(documentData: {
       } catch (parseError) {
         console.error('Error al parsear la respuesta:', parseError)
       }
+      
+      // Actualizar el estado del documento para indicar el error
+      await supabase
+        .from('documents')
+        .update({ 
+          processed_by_n8n: false,
+          processed_at: new Date().toISOString()
+        })
+        .eq('id', documentData.id)
+      
       throw new Error(errorMessage)
     }
 

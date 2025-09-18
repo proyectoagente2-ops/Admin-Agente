@@ -11,7 +11,7 @@ export default async function DashboardPage({
 }: {
   searchParams: { q?: string; flow?: 'aprendiz' | 'instructor' | 'administrativo' }
 }) {
-  const supabase = await createServerClient() as import('@supabase/supabase-js').SupabaseClient
+  const supabase = await createServerClient()
   const { data: { user } } = await supabase.auth.getUser()
   
   if (!user) {
